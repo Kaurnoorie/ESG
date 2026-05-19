@@ -15,10 +15,10 @@ def plot_relationship_dashboard(context: dict) -> None:
     """Create the 12-panel relationship dashboard from the final notebook section."""
 
     historical_df = context["historical_df"]
+    panel_df = context.get("panel_df", historical_df)
     combined_df = context["combined_df"]
     future_df = context["future_df"]
     rolling_df = context["rolling_df"]
-    future_esg = context["future_esg"]
     roa_models = context["roa_models"]
     roe_models = context["roe_models"]
     model_roa = context["model_roa_linear"]
@@ -34,12 +34,11 @@ def plot_relationship_dashboard(context: dict) -> None:
     plt.style.use("seaborn-v0_8-darkgrid")
     fig = plt.figure(figsize=(22, 16))
 
-    esg_range = np.linspace(historical_df["ESG_Score"].min() - 2, historical_df["ESG_Score"].max() + 2, 100).reshape(-1, 1)
+    esg_range = np.linspace(panel_df["ESG_Score"].min() - 2, panel_df["ESG_Score"].max() + 2, 100).reshape(-1, 1)
 
     ax1 = plt.subplot(3, 4, 1)
-    scatter1 = ax1.scatter(historical_df["ESG_Score"], historical_df["Pretax_ROA"], c=historical_df["Year"], cmap="viridis", s=120, alpha=0.8, edgecolors="black", linewidth=1.5)
+    scatter1 = ax1.scatter(panel_df["ESG_Score"], panel_df["Pretax_ROA"], c=panel_df["Year"], cmap="viridis", s=20, alpha=0.5, edgecolors="none")
     ax1.plot(esg_range, model_roa.predict(esg_range), "r--", linewidth=2.5, label=f"Linear Fit (R2={r2_roa:.3f})")
-    ax1.scatter(future_df["ESG_Score"], roa_models["XGBoost"]["model"].predict(future_esg), c="red", s=150, marker="s", edgecolors="black", linewidth=2, label="Predicted (2026-2030)")
     ax1.set_xlabel("ESG Score", fontsize=11, fontweight="bold")
     ax1.set_ylabel("Pretax ROA (%)", fontsize=11, fontweight="bold")
     ax1.set_title(f"ESG vs ROA: Correlation = {corr_esg_roa:.3f}", fontsize=12, fontweight="bold")
@@ -48,9 +47,8 @@ def plot_relationship_dashboard(context: dict) -> None:
     plt.colorbar(scatter1, ax=ax1, label="Year")
 
     ax2 = plt.subplot(3, 4, 2)
-    scatter2 = ax2.scatter(historical_df["ESG_Score"], historical_df["Pretax_ROE"], c=historical_df["Year"], cmap="plasma", s=120, alpha=0.8, edgecolors="black", linewidth=1.5)
+    scatter2 = ax2.scatter(panel_df["ESG_Score"], panel_df["Pretax_ROE"], c=panel_df["Year"], cmap="plasma", s=20, alpha=0.5, edgecolors="none")
     ax2.plot(esg_range, model_roe.predict(esg_range), "r--", linewidth=2.5, label=f"Linear Fit (R2={r2_roe:.3f})")
-    ax2.scatter(future_df["ESG_Score"], roe_models["XGBoost"]["model"].predict(future_esg), c="red", s=150, marker="s", edgecolors="black", linewidth=2, label="Predicted (2026-2030)")
     ax2.set_xlabel("ESG Score", fontsize=11, fontweight="bold")
     ax2.set_ylabel("Pretax ROE (%)", fontsize=11, fontweight="bold")
     ax2.set_title(f"ESG vs ROE: Correlation = {corr_esg_roe:.3f}", fontsize=12, fontweight="bold")
@@ -59,7 +57,7 @@ def plot_relationship_dashboard(context: dict) -> None:
     plt.colorbar(scatter2, ax=ax2, label="Year")
 
     ax3 = plt.subplot(3, 4, 3)
-    corr_matrix = historical_df[["ESG_Score", "Pretax_ROA", "Pretax_ROE"]].corr()
+    corr_matrix = panel_df[["ESG_Score", "Pretax_ROA", "Pretax_ROE"]].corr()
     sns.heatmap(corr_matrix, annot=True, fmt=".3f", cmap="RdYlGn", center=0, square=True, linewidths=2, cbar_kws={"shrink": 0.8}, vmin=-1, vmax=1, ax=ax3)
     ax3.set_title("Correlation Matrix (2011-2025)", fontsize=12, fontweight="bold")
     ax3.set_xticklabels(["ESG", "ROA", "ROE"], rotation=0)
@@ -162,10 +160,7 @@ ROE = {model_roe.coef_[0]:.4f} x ESG + {model_roe.intercept_:.2f}
     ax10.grid(True, alpha=0.3)
 
     ax11 = plt.subplot(3, 4, 11)
-    roa_std = historical_df["Pretax_ROA"].std()
-    future_roa_xgb = roa_models["XGBoost"]["model"].predict(future_esg)
-    ax11.fill_between(future_df["Year"], future_roa_xgb - roa_std, future_roa_xgb + roa_std, alpha=0.3, color="#E67E22", label="Confidence Band")
-    ax11.plot(future_df["Year"], future_roa_xgb, "o-", linewidth=3, markersize=10, color="#E67E22", label="XGBoost Prediction")
+    ax11.plot(future_df["Year"], future_df["Pretax_ROA"], "o-", linewidth=3, markersize=10, color="#E67E22", label="Time Series Forecast")
     ax11.plot(historical_df["Year"].iloc[-3:], historical_df["Pretax_ROA"].iloc[-3:], "s--", linewidth=2, markersize=8, color="gray", alpha=0.7, label="Recent Historical")
     ax11.set_xlabel("Year", fontsize=11, fontweight="bold")
     ax11.set_ylabel("Pretax ROA (%)", fontsize=11, fontweight="bold")
@@ -187,8 +182,8 @@ KEY INSIGHTS
    1pt ESG changes ROE by {model_roe.coef_[0]:.3f}%
 
 3. FUTURE OUTLOOK:
-   ESG stabilizes near {future_df['ESG_Score'].mean():.2f}
-   ROA stabilizes near {future_roa_xgb.mean():.2f}%
+   ESG reaches {future_df['ESG_Score'].iloc[-1]:.2f} by 2030
+   ROA reaches {future_df['Pretax_ROA'].iloc[-1]:.2f}% by 2030
 """
     ax12.text(0.05, 0.95, insights, fontsize=10, family="monospace", va="top", bbox=dict(boxstyle="round", facecolor="lightblue", alpha=0.4))
 
@@ -202,8 +197,7 @@ def plot_detailed_relationship(context: dict) -> None:
     """Create the smaller residual and correlation comparison figure."""
 
     historical_df = context["historical_df"]
-    combined_corr_roa = context["combined_corr_roa"]
-    combined_corr_roe = context["combined_corr_roe"]
+    panel_df = context.get("panel_df", historical_df)
     corr_esg_roa = context["corr_esg_roa"]
     corr_esg_roe = context["corr_esg_roe"]
     y_roa = context["y_roa"]
@@ -214,7 +208,7 @@ def plot_detailed_relationship(context: dict) -> None:
     fig, axes = plt.subplots(2, 2, figsize=(16, 12))
 
     ax = axes[0, 0]
-    ax.scatter(y_roa_pred, y_roa - y_roa_pred, c=historical_df["Year"], cmap="viridis", s=120, alpha=0.8, edgecolors="black")
+    ax.scatter(y_roa_pred, y_roa - y_roa_pred, c=panel_df["Year"], cmap="viridis", s=20, alpha=0.5, edgecolors="none")
     ax.axhline(y=0, color="red", linestyle="--", linewidth=2)
     ax.set_xlabel("Predicted ROA (%)", fontsize=11, fontweight="bold")
     ax.set_ylabel("Residuals", fontsize=11, fontweight="bold")
@@ -222,7 +216,7 @@ def plot_detailed_relationship(context: dict) -> None:
     ax.grid(True, alpha=0.3)
 
     ax = axes[0, 1]
-    ax.scatter(y_roe_pred, y_roe - y_roe_pred, c=historical_df["Year"], cmap="plasma", s=120, alpha=0.8, edgecolors="black")
+    ax.scatter(y_roe_pred, y_roe - y_roe_pred, c=panel_df["Year"], cmap="plasma", s=20, alpha=0.5, edgecolors="none")
     ax.axhline(y=0, color="red", linestyle="--", linewidth=2)
     ax.set_xlabel("Predicted ROE (%)", fontsize=11, fontweight="bold")
     ax.set_ylabel("Residuals", fontsize=11, fontweight="bold")
@@ -232,9 +226,8 @@ def plot_detailed_relationship(context: dict) -> None:
     ax = axes[1, 0]
     categories = ["ESG vs\nROA", "ESG vs\nROE"]
     x = np.arange(len(categories))
-    width = 0.35
-    ax.bar(x - width / 2, [corr_esg_roa, corr_esg_roe], width, label="Historical (2011-25)", color="#3498DB", alpha=0.8)
-    ax.bar(x + width / 2, [combined_corr_roa, combined_corr_roe], width, label="With Future (2011-30)", color="#E74C3C", alpha=0.8)
+    width = 0.5
+    ax.bar(x, [corr_esg_roa, corr_esg_roe], width, label="Cross-sectional (2011-2025)", color="#3498DB", alpha=0.8)
     ax.set_ylabel("Correlation Coefficient", fontsize=11, fontweight="bold")
     ax.set_title("Correlation Comparison", fontsize=13, fontweight="bold")
     ax.set_xticks(x)

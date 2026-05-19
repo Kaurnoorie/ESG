@@ -8,9 +8,9 @@ from models import best_model_name
 
 
 MODEL_COLORS = {
-    "XGBoost": "#E74C3C",
-    "Random Forest": "#3498DB",
-    "Decision Tree": "#2ECC71",
+    "Linear Regression": "#E74C3C",
+    "Ridge": "#3498DB",
+    "ElasticNet": "#2ECC71",
 }
 
 
@@ -164,7 +164,7 @@ def plot_detailed_trends(historical_df, model_results, future_years) -> None:
             markeredgewidth=2,
         )
 
-        markers = {"XGBoost": "s", "Random Forest": "^", "Decision Tree": "D"}
+        markers = {"Linear Regression": "s", "Ridge": "^", "ElasticNet": "D"}
         for model_name, result in results.items():
             ax.plot(
                 future_years,

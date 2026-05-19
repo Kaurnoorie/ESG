@@ -9,7 +9,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
 
 from config import OUTPUT_DIR
-from data_processing import ensure_output_dir
+from data_processing import ensure_output_dir, load_banking_dataset
 from models import train_relationship_models
 from relationship_plots import plot_detailed_relationship, plot_relationship_dashboard
 from trend_analysis import run_trend_analysis
@@ -53,25 +53,30 @@ def run_relationship_analysis() -> dict:
     ensure_output_dir()
     historical_df, predictions_df = _load_or_create_trend_outputs()
 
+    # Load panel dataset for relationship analysis to avoid data destruction
+    dataset = load_banking_dataset()
+    panel_df = dataset.panel
+
     future_df = pd.DataFrame(
         {
             "Year": predictions_df["Year"],
-            "ESG_Score": predictions_df["ESG_Score_XGBoost"],
-            "Pretax_ROA": predictions_df["Pretax_ROA_XGBoost"],
-            "Pretax_ROE": predictions_df["Pretax_ROE_XGBoost"],
+            "ESG_Score": predictions_df["ESG_Score_Linear_Regression"],
+            "Pretax_ROA": predictions_df["Pretax_ROA_Linear_Regression"],
+            "Pretax_ROE": predictions_df["Pretax_ROE_Linear_Regression"],
         }
     )
     combined_df = pd.concat([historical_df, future_df], ignore_index=True)
 
-    corr_esg_roa = historical_df["ESG_Score"].corr(historical_df["Pretax_ROA"])
-    corr_esg_roe = historical_df["ESG_Score"].corr(historical_df["Pretax_ROE"])
-    corr_roa_roe = historical_df["Pretax_ROA"].corr(historical_df["Pretax_ROE"])
-    _, p_roa = _correlation_test(historical_df["ESG_Score"], historical_df["Pretax_ROA"])
-    _, p_roe = _correlation_test(historical_df["ESG_Score"], historical_df["Pretax_ROE"])
+    # Use panel data for computing correlation properly instead of aggregated data
+    corr_esg_roa = panel_df["ESG_Score"].corr(panel_df["Pretax_ROA"])
+    corr_esg_roe = panel_df["ESG_Score"].corr(panel_df["Pretax_ROE"])
+    corr_roa_roe = panel_df["Pretax_ROA"].corr(panel_df["Pretax_ROE"])
+    _, p_roa = _correlation_test(panel_df["ESG_Score"], panel_df["Pretax_ROA"])
+    _, p_roe = _correlation_test(panel_df["ESG_Score"], panel_df["Pretax_ROE"])
 
-    X_esg = historical_df["ESG_Score"].values.reshape(-1, 1)
-    y_roa = historical_df["Pretax_ROA"].values
-    y_roe = historical_df["Pretax_ROE"].values
+    X_esg = panel_df["ESG_Score"].values.reshape(-1, 1)
+    y_roa = panel_df["Pretax_ROA"].values
+    y_roe = panel_df["Pretax_ROE"].values
 
     model_roa_linear = LinearRegression().fit(X_esg, y_roa)
     y_roa_pred = model_roa_linear.predict(X_esg)
@@ -81,18 +86,10 @@ def run_relationship_analysis() -> dict:
     y_roe_pred = model_roe_linear.predict(X_esg)
     r2_roe_linear = r2_score(y_roe, y_roe_pred)
 
-    roa_models = train_relationship_models(historical_df["ESG_Score"], y_roa)
-    roe_models = train_relationship_models(historical_df["ESG_Score"], y_roe)
+    roa_models = train_relationship_models(panel_df["ESG_Score"], y_roa)
+    roe_models = train_relationship_models(panel_df["ESG_Score"], y_roe)
 
-    future_esg = future_df["ESG_Score"].values.reshape(-1, 1)
-    future_relationships = pd.DataFrame({"Year": future_df["Year"], "ESG_Score": future_df["ESG_Score"]})
-    for model_name in ["XGBoost", "Random Forest", "Decision Tree"]:
-        future_relationships[f"ROA_{model_name.replace(' ', '_')}"] = roa_models[model_name]["model"].predict(future_esg)
-        future_relationships[f"ROE_{model_name.replace(' ', '_')}"] = roe_models[model_name]["model"].predict(future_esg)
-
-    rolling_df = _rolling_correlations(combined_df)
-    combined_corr_roa = combined_df["ESG_Score"].corr(combined_df["Pretax_ROA"])
-    combined_corr_roe = combined_df["ESG_Score"].corr(combined_df["Pretax_ROE"])
+    rolling_df = _rolling_correlations(historical_df)
 
     correlation_results = pd.DataFrame(
         {
@@ -108,15 +105,14 @@ def run_relationship_analysis() -> dict:
 
     correlation_results.to_csv(OUTPUT_DIR / "banking_correlation_results.csv", index=False)
     rolling_df.to_csv(OUTPUT_DIR / "banking_rolling_correlations.csv", index=False)
-    future_relationships.to_csv(OUTPUT_DIR / "banking_future_relationships.csv", index=False)
 
     context = {
         "historical_df": historical_df,
+        "panel_df": panel_df,
         "predictions_df": predictions_df,
         "future_df": future_df,
         "combined_df": combined_df,
         "rolling_df": rolling_df,
-        "future_esg": future_esg,
         "corr_esg_roa": corr_esg_roa,
         "corr_esg_roe": corr_esg_roe,
         "corr_roa_roe": corr_roa_roe,
@@ -132,9 +128,6 @@ def run_relationship_analysis() -> dict:
         "r2_roe_linear": r2_roe_linear,
         "roa_models": roa_models,
         "roe_models": roe_models,
-        "future_relationships": future_relationships,
-        "combined_corr_roa": combined_corr_roa,
-        "combined_corr_roe": combined_corr_roe,
     }
 
     plot_relationship_dashboard(context)
@@ -152,14 +145,11 @@ def print_summary(context: dict) -> None:
     print("\nRegression equations:")
     print(f"  ROA = {context['model_roa_linear'].coef_[0]:.6f} x ESG + {context['model_roa_linear'].intercept_:.6f}")
     print(f"  ROE = {context['model_roe_linear'].coef_[0]:.6f} x ESG + {context['model_roe_linear'].intercept_:.6f}")
-    print("\nFuture relationship predictions:")
-    print(context["future_relationships"].to_string(index=False))
     print("\nFiles generated in outputs/:")
     print("  banking_esg_relationship_analysis.png")
     print("  banking_detailed_relationship.png")
     print("  banking_correlation_results.csv")
     print("  banking_rolling_correlations.csv")
-    print("  banking_future_relationships.csv")
 
 
 def main() -> None:

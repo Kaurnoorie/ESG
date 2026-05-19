@@ -4,8 +4,18 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeRegressor
 from xgboost import XGBRegressor
+
+
+def _time_series_models() -> dict:
+    from sklearn.linear_model import ElasticNet, LinearRegression, Ridge
+    return {
+        "Linear Regression": LinearRegression(),
+        "Ridge": Ridge(),
+        "ElasticNet": ElasticNet(),
+    }
 
 
 def _default_models() -> dict:
@@ -47,17 +57,34 @@ def train_time_series_models(
     y = np.asarray(values)
     X_future = np.asarray(future_years).reshape(-1, 1)
 
+    # Chronological train-test split (test on the last 3 years)
+    test_size = 3
+    if len(X) > test_size + 2:
+        X_train, X_test = X[:-test_size], X[-test_size:]
+        y_train, y_test = y[:-test_size], y[-test_size:]
+    else:
+        X_train, X_test = X, X
+        y_train, y_test = y, y
+
     results = {}
-    for model_name, model in _default_models().items():
-        model.fit(X, y)
-        training_predictions = model.predict(X)
-        future_predictions = model.predict(X_future)
+    for model_name, _ in _time_series_models().items():
+        # Train and evaluate on split to get honest metrics
+        model_eval = _time_series_models()[model_name]
+        model_eval.fit(X_train, y_train)
+        test_predictions = model_eval.predict(X_test)
+        metrics = _regression_metrics(y_test, test_predictions)
+
+        # Train full model for returning actual future predictions and plotting
+        model_full = _time_series_models()[model_name]
+        model_full.fit(X, y)
+        training_predictions = model_full.predict(X)
+        future_predictions = model_full.predict(X_future)
 
         results[model_name] = {
-            "model": model,
+            "model": model_full,
             "predictions_train": training_predictions,
             "predictions_future": future_predictions,
-            **_regression_metrics(y, training_predictions),
+            **metrics,
         }
 
     return results
@@ -69,15 +96,26 @@ def train_relationship_models(esg_scores: np.ndarray, values: np.ndarray) -> dic
     X = np.asarray(esg_scores).reshape(-1, 1)
     y = np.asarray(values)
 
+    # Random train-test split for relationship evaluation
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
     results = {}
-    for model_name, model in _default_models().items():
-        model.fit(X, y)
-        predictions = model.predict(X)
+    for model_name, _ in _default_models().items():
+        # Train and evaluate on split to get honest metrics
+        model_eval = _default_models()[model_name]
+        model_eval.fit(X_train, y_train)
+        test_predictions = model_eval.predict(X_test)
+        metrics = _regression_metrics(y_test, test_predictions)
+
+        # Train full model for returning overall predictions for plotting
+        model_full = _default_models()[model_name]
+        model_full.fit(X, y)
+        predictions = model_full.predict(X)
 
         results[model_name] = {
-            "model": model,
+            "model": model_full,
             "predictions": predictions,
-            **_regression_metrics(y, predictions),
+            **metrics,
         }
 
     return results

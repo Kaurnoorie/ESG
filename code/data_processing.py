@@ -21,6 +21,7 @@ class BankingDataset:
     """Processed banking panel data used by the analysis scripts."""
 
     historical: pd.DataFrame
+    panel: pd.DataFrame
     company_info: pd.DataFrame
     years: list[int]
     esg_data: np.ndarray
@@ -95,8 +96,25 @@ def load_banking_dataset(path=DATA_FILE) -> BankingDataset:
         }
     )
 
+    panel_rows = []
+    for i, company in company_info.iterrows():
+        for j, year in enumerate(years):
+            esg = esg_data[i, j]
+            roa = roa_data[i, j]
+            roe = roe_data[i, j]
+            if not np.isnan(esg) and not np.isnan(roa) and not np.isnan(roe):
+                row = company.to_dict()
+                row["Year"] = year
+                row["ESG_Score"] = esg
+                row["Pretax_ROA"] = roa * 100
+                row["Pretax_ROE"] = roe * 100
+                panel_rows.append(row)
+    
+    panel = pd.DataFrame(panel_rows)
+
     return BankingDataset(
         historical=historical,
+        panel=panel,
         company_info=company_info,
         years=years,
         esg_data=esg_data,

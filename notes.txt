@@ -1,0 +1,59 @@
+Listed directory code
+Viewed data_processing.py:1-106
+Viewed models.py:1-121
+Viewed relationship_analysis.py:1-172
+Viewed trend_analysis.py:1-88
+Viewed config.py:1-23
+Viewed run_all.py:1-17
+
+Based on my review of the files in the `/Users/prabhnoor/Documents/noor-esg/code` directory, I've identified several critical conceptual and methodological flaws. Your intuition is completely correct.
+
+Here is a breakdown of the major issues:
+
+### 1. No Train-Test Splitting (Extreme Overfitting)
+In `models.py`, both `train_time_series_models` and `train_relationship_models` fit the machine learning models on the **entire dataset** and then evaluate them on that exact same data:
+
+```python
+model.fit(X, y)
+training_predictions = model.predict(X)
+# Metrics are calculated on training_predictions vs y
+```
+Because there is no validation or holdout test set, the performance metrics (like $R^2$) are dangerously misleading. Tree-based models (especially with parameters like `max_depth=5` as seen in `_default_models`) will easily memorize a dataset this small, resulting in near-perfect scores that do not reflect the model's actual ability to predict unseen data.
+
+### 2. Destruction of Panel Data (Improper Feature Usage)
+The most severe data issue happens in `data_processing.py`. It appears you have a rich panel dataset (multiple companies tracked over multiple years). However, the code aggregates all this data away:
+
+```python
+"ESG_Score": np.nanmean(esg_data, axis=0),
+"Pretax_ROA": np.nanmean(roa_data, axis=0) * 100,
+```
+By taking the mean across all companies for each year, a rich dataset of hundreds of data points is collapsed into a tiny time series of just ~15 points (years 2011–2025). 
+* **For time series:** Training XGBoost on 15 rows of data is severe overkill and will just memorize noise.
+* **For relationship analysis:** Averaging destroys all cross-sectional variance. A proper relationship model would use the company-level panel data (e.g., predicting Company A's ROA based on Company A's ESG score) rather than looking at global yearly averages.
+
+### 3. Tree Models Cannot Extrapolate Time Series
+In `train_time_series_models`, the raw `Year` integer (e.g., 2011, 2012) is used as the *only* feature to predict future values (2026-2030):
+```python
+X = np.asarray(years).reshape(-1, 1) # Feature is literally just the Year integer
+```
+Tree-based models (Random Forest, XGBoost, Decision Trees) fundamentally **cannot extrapolate beyond the bounds of their training data**. If the maximum year seen in training is 2025, any prediction for 2026, 2027, or 2030 will simply output the exact same value the model learned for 2025. Your forecasts are likely just horizontal flatlines. For time-series forecasting, you need models like ARIMA, Prophet, or at least linear regression to capture trends.
+
+### 4. Flawed Compounding Forecasts
+In `relationship_analysis.py`, the code does something very dangerous with the forecasts:
+1. It trains a model mapping historical ESG $\rightarrow$ historical ROA.
+2. It takes the *forecasted* ESG scores from the time series model (which we know are flawed flatlines).
+3. It feeds those forecasted ESG scores into the relationship model to predict future ROA.
+
+This stacks errors on top of errors. Furthermore, `trend_analysis.py` *already* creates a forecast for ROA/ROE based on time. Generating a second, conflicting set of forecasts using a different methodology leads to contradictory results.
+
+### 5. Meaningless Rolling Correlations
+In `relationship_analysis.py`, the code concatenates historical actual data with the forecasted future data into `combined_df`, and then calculates `_rolling_correlations` on it. 
+Calculating statistical correlations on deterministic, artificially generated model outputs is meaningless. The future "correlation" will just be a reflection of the algorithm's math, not real-world variance.
+
+***
+
+**How to fix this fundamentally:**
+1. **Stop aggregating in `data_processing.py`:** Keep the data at the Company-Year level (Panel Data).
+2. **Use Panel Regression for Relationships:** Use fixed-effects or mixed-effects regression on the company-level data to find the true relationship between ESG and ROA/ROE.
+3. **Change Time Series Models:** Do not use XGBoost/Random Forest with "Year" as the sole feature. Use ARIMA, Exponential Smoothing, or basic Linear trend lines if you just want to forecast the aggregated macro trend.
+4. **Implement Train/Test Splits:** Use Time-Series split (e.g., train on 2011-2022, test on 2023-2025) to properly validate any models you build.
